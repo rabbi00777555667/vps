@@ -1,39 +1,57 @@
-name: Shawon-Tailscale
-on:
+name: Windows-RDP-Tailscale
+on: 
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Install Tailscale
+        shell: powershell
+        run: |
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile tailscale.msi
+          Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /qn /norestart" -Wait
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-
-      - name: Configure RDP and Create Admin User
+        shell: powershell
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # Enable RDP
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$env:TS_KEY --accept-routes
+          Write-Host "Connected to Tailscale Mesh Network."
+
+      - name: Enable RDP and Setup User
+        shell: powershell
+        run: |
+          # Enable RDP in Registry
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           
-          # Create User: Shawon
+          # Create Admin User
           $Password = ConvertTo-SecureString "Shawon@2025!" -AsPlainText -Force
           New-LocalUser "Shawon" -Password $Password -FullName "Shawon Admin"
           Add-LocalGroupMember -Group "Administrators" -Member "Shawon"
-          
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-          Write-Host "RDP Configuration Complete."
+          Write-Host "User 'Shawon' created with password 'Shawon@2025!'"
 
-      - name: Get Connection Details
+      - name: Connection Info
+        shell: powershell
         run: |
-          Write-Host "=============================================================="
-          Write-Host "            RDP CONNECTION DETAILS (TAILSCALE)"
-          Write-Host "=============================================================="
-          Write-Host "Username: Shawon"
+          $ip = (& "C:\Program Files\Tailscale\tailscale.exe" ip -4)
+          Write-Host "=========================================="
+          Write-Host "IP ADDRESS: $ip"
+          Write-Host "USERNAME:   Shawon"
+          Write-Host "PASSWORD:   Shawon@2025!"
+          Write-Host "=========================================="
+
+      - name: Keep Alive (6 Hours)
+        shell: powershell
+        run: |
+          $totalMinutes = 360
+          for ($i=1; $i -le $totalMinutes; $i++) {
+              Write-Host "RDP Active... Minute $i of $totalMinutes"
+              Start-Sleep -Seconds 60
+          }
           Write-Host "Password: Shawon@2025!"
           Write-Host "Connect to this IP:"
           tailscale ip -4
